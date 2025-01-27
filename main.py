@@ -1,3 +1,4 @@
+import sys
 import argparse
 import json
 import os
@@ -17,6 +18,7 @@ import numpy as np
 from AWS_profile import AWS_profile, calculate_services
 from settings import Config
 
+NUMBER_OF_THREADS = 0
 
 file_handler = logging.FileHandler("logs.txt")
 file_handler.setLevel(logging.INFO)
@@ -101,10 +103,23 @@ def load_config(credentials_file_path: Path = Path.home() / ".aws" / "credential
 
 if __name__ == "__main__":
 
+    list_of_services = list()
+    if Config.SERVICES_FILE_MAPPING.exists():
+        with Config.SERVICES_FILE_MAPPING.open("r") as f:
+            bf_services = json.load(f)
+        list_of_services = list(bf_services.keys())
+
     parser = argparse.ArgumentParser(description='Bruteforce AWS rights with boto3')
     parser.add_argument('-t', '--threads', type=int, default=75, help='Number of threads to use')
-    parser.add_argument('-r', '--remove-services', default="cloudhsm,cloudhsmv2,sms,sms-voice.pinpoint", help='List of services to remove separated by comma')
-    parser.add_argument('-u', '--update-services', action="store_true", default=False, help='Update dynamically list of AWS services and associated functions')
+    parser.add_argument('-u', '--update-services', action="store_true", default=False,
+                        help='Update dynamically list of AWS services and associated functions')
+    parser.add_argument('-b', '--black-list', nargs='*', choices=list_of_services,
+                        default="cloudhsm,cloudhsmv2,sms,sms-voice.pinpoint",
+                        help='List of services to remove separated by comma. Launch script with -p to see services', metavar='PARAMETER')
+    parser.add_argument('-w', '--white-list', nargs='*', choices=list_of_services,
+                        default=[],
+                        help='List of services to whitelist/scan separated by comma. Launch script with -p to see services', metavar='PARAMETER')
+    parser.add_argument('-p', '--print-services', action="store_true", help='List of services to whitelist/scan separated by comma')
     args = parser.parse_args()
 
     settings = load_config()
@@ -113,12 +128,23 @@ if __name__ == "__main__":
         logger.info("Updating dynamically list of AWS services and associated functions")
         update = AWS_profile(settings)
         update.update_dynamically_services_functions(output_file=Config.SERVICES_FILE_MAPPING)
+        logger.success("Update finished !")
+        logger.info("Run this script a second time to perform actions.")
+        sys.exit(0)
+
+    if args.print_services:
+        print('\t'.join(list_of_services))
+        sys.exit(0)
 
     with Config.SERVICES_FILE_MAPPING.open("r") as f:
-        bf_endpoints = json.load(f)
+        bf_services = json.load(f)
 
-    services_to_bf = calculate_services(removed_services=args.remove_services, bf_endpoints=bf_endpoints)
-    services_chunks = np.array_split(services_to_bf, args.threads)
+    services_to_bf = calculate_services(white_list=args.white_list, black_list=args.black_list, bf_services=bf_services)
+
+    NUMBER_OF_THREADS = len(services_to_bf) if len(services_to_bf) < args.threads else args.threads
+
+    services_chunks = np.array_split(services_to_bf, NUMBER_OF_THREADS)
+    print(services_chunks)
     services_chunks = [list(chunk) for chunk in services_chunks]
 
     test_obj = AWS_profile(settings)
@@ -140,13 +166,13 @@ if __name__ == "__main__":
         # Add tasks to the progress bar
         task_progress_ids = {
             service: progress.add_task(f"[green]Processing {service}...", total=len(endpoints))
-            for service, endpoints in bf_endpoints.items() if service in services_to_bf
+            for service, endpoints in bf_services.items() if service in services_to_bf
         }
 
         # Start worker threads
         threads = []
         for _ in range(args.threads):  # Adjust the number of threads as needed
-            thread = threading.Thread(target=worker, args=(task_queue, test_obj, progress, task_progress_ids, bf_endpoints))
+            thread = threading.Thread(target=worker, args=(task_queue, test_obj, progress, task_progress_ids, bf_services))
             thread.start()
             threads.append(thread)
 
