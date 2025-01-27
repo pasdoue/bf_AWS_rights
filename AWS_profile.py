@@ -124,7 +124,9 @@ class AWS_profile:
             :param res:
             :return:
         """
-        output_folder = Path(__file__).parent / "out"
+        arn = boto3.client('sts').get_caller_identity().get('Arn')
+        arn = arn.split(':')[-1].replace('/','_')
+        output_folder = Path(__file__).parent / arn
         output_file = output_folder / f"{service}.json"
 
         if not output_folder.exists():
@@ -132,13 +134,22 @@ class AWS_profile:
 
         output_file.write_text(json.dumps(res, indent=4, sort_keys=True, default=str))
 
-def calculate_services(removed_services: List[str], bf_endpoints: dict) -> List[str]:
+def calculate_services(white_list: List[str], black_list: List[str], bf_services: dict) -> List[str]:
     """
-        Return list of AWS services to bruteforce excluding removed ones
-        :param removed_services:
+        Return list of AWS services to bruteforce first including white list if exists and then always exclude black list.
+        :param white_list: list of services to scan
+        :param black_list: list of services to avoid
         :return:
     """
-    if isinstance(removed_services, str):
-        removed_services = removed_services.split(",")
+    res = list(bf_services.keys())
+    if isinstance(black_list, str):
+        black_list = black_list.strip().split(",")
 
-    return [i for i in list(bf_endpoints.keys()) if i not in removed_services]
+    if isinstance(white_list, str):
+        white_list = white_list.strip().split(",")
+
+    if white_list:
+        res = [i for i in res if i in white_list]
+    if black_list:
+        res = [i for i in res if i not in black_list]
+    return res
