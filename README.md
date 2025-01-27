@@ -36,6 +36,7 @@ export AWS_SESSION_TOKEN="IQoJb3JpZ2luX2VjEDMaCXV...EAph1DEF8Y="
 
 2. Generate AWS boto config file first launch or force it
 
+If you run this script the first time with or without params, it will perform an update of sessions and functions avalaibale by boto first.
 ```bash
 python3 main.py -u
 ```
@@ -45,8 +46,7 @@ python3 main.py -u
 > Help
 
 ```bash
-python3 main.py -h
-usage: main.py [-h] [-t THREADS] [-r REMOVE_SERVICES] [-u]
+usage: main.py [-h] [-t THREADS] [-u] [-b [PARAMETER ...]] [-w [PARAMETER ...]] [-p]
 
 Bruteforce AWS rights with boto3
 
@@ -54,23 +54,32 @@ options:
   -h, --help            show this help message and exit
   -t THREADS, --threads THREADS
                         Number of threads to use
-  -r REMOVE_SERVICES, --remove-services REMOVE_SERVICES
-                        List of services to remove separated by comma
   -u, --update-services
                         Update dynamically list of AWS services and associated functions
+  -b [PARAMETER ...], --black-list [PARAMETER ...]
+                        List of services to remove separated by comma. Launch script with -p to see services
+  -w [PARAMETER ...], --white-list [PARAMETER ...]
+                        List of services to whitelist/scan separated by comma. Launch script with -p to see services
+  -p, --print-services  List of services to whitelist/scan separated by comma
 ```
 
+Show list of services : 
 ```bash
-python3 main.py
+python3 main.py -p
 ```
 
+Generate scan with white-list : 
+```bash
+python3 main.py -w ec2 sts pricing dynamodb
+```
 
-## TODO
+Generate scan with black-list : 
+```bash
+python3 main.py -b cloudhsm cloudhsmv2 sms dynamodb
+```
 
-- Adding more furtive way
-  - Discard service function that does not contains "list, get..." ?
-  - Maybe look a little more when retrieving dynamically boto structure for our own needs (maybe inspector can help : args nb, args type...)
-
-
-
+Generate scan with black-list & white-list (will perform scan on white list without "dynamodb" service): 
+```bash
+python3 main.py -w ec2 sts pricing dynamodb -b cloudhsm cloudhsmv2 sms dynamodb
+```
 
