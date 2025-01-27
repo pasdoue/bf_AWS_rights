@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools", "wheel", "attrs"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bf_AWS_rights"
+authors = [
+  {name = "pasdoue", email = "pasdoue@mail.com"},
+]
+maintainers = [
+  {name = "pasdoue", email = "pasdoue@mail.com"}
+]
+
+description = "AWS IAM bruteforcer"
+readme = "README.md"
+keywords = ["AWS", "IAM", "bruteforce"]
+dependencies = [
+    "R2Log",
+    "boto3",
+    "botocore",
+    "numpy",
+]
+dynamic = ["version"]
+requires-python = ">= 3.10"
+
+[tool.setuptools]
+py-modules = []
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
