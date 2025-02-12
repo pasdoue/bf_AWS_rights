@@ -7,9 +7,8 @@ import time
 import logging
 from typing import List
 
-from R2Log import logger
+from R2Log import logger, console
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
-from rich.console import Console
 
 from rich.prompt import Prompt, Confirm
 from configparser import ConfigParser
@@ -31,8 +30,6 @@ file_handler.setFormatter(formatter)
 
 # Add the file handler to the logger
 logger.addHandler(file_handler)
-
-console = Console()
 
 def print_banner() -> None:
     banner = """
