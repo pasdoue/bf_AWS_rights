@@ -92,7 +92,7 @@ python3 main.py --unsafe-mode
 
 ## TBD : 
 
-- [ ] Try to attach logger messages to console
+- [X] Try to attach logger messages to console
 
 
 ## Bonus
