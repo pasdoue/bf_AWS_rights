@@ -11,15 +11,16 @@ from libs.Services import Services, Service, Function
 from settings import Config
 
 
-def write_rights_to_file(service: Service, res: dict):
+def write_rights_to_file(service: Service, arn: str, res: dict):
     """
         Write to output file the result of batch
         :param service:
+        :param arn:
         :param res:
         :return:
     """
-    arn = boto3.client('sts').get_caller_identity().get('Arn')  # retrieve user Arn
-    arn = arn.split(':')[-1].replace('/', '_')  # Get end of Arn which is human-readable and remove '/' inside
+    # arn = session_obj.client('sts').get_caller_identity().get('Arn')  # retrieve user Arn
+    # arn = arn.split(':')[-1].replace('/', '_')  # Get end of Arn which is human-readable and remove '/' inside
     output_folder = Path(__file__).parent / arn
     output_file = output_folder / f"{service.name}.json"
 
@@ -29,7 +30,7 @@ def write_rights_to_file(service: Service, res: dict):
     output_file.write_text(json.dumps(res, indent=4, sort_keys=True, default=str))
 
 
-def check_rights(service: Service, session_obj: boto3.session.Session, progress, progress_id) -> dict:
+def check_rights(arn: str, service: Service, session_obj: boto3.session.Session, progress, progress_id) -> dict:
         res = dict()
         res[service.name] = {}
 
@@ -58,7 +59,7 @@ def check_rights(service: Service, session_obj: boto3.session.Session, progress,
                         # logger.warning(f"Function {function} empty")
                         res[service.name][function.name] = "empty"
                 progress.update(progress_id, advance=1)
-        write_rights_to_file(service=service, res=res)
+        write_rights_to_file(service=service, arn=arn, res=res)
         progress.remove_task(progress_id)
         return res
 
@@ -71,13 +72,12 @@ class AWS_profile:
             Init object according to input settings (
             :param kwargs: creds used
         """
-        self.boto_session = boto3.session.Session()
+        self.boto_session = boto3.session.Session(**creds)
         self.__services = services
         self.__safe_mode = True
-        self.arn = boto3.client('sts').get_caller_identity().get('Arn')
+        self.arn = self.boto_session.client('sts').get_caller_identity().get('Arn')
         self.arn_linux_safe = self.arn.split(':')[-1].replace('/','_') # Get end of Arn which is human-readable and remove '/' inside
-        for k, v in creds.items():
-            setattr(self, k, v)
+
 
     def set_unsafe_mode(self):
         self.__safe_mode = False
@@ -90,33 +90,28 @@ class AWS_profile:
         all_res = list()
         for service in services:
             try:
-                client = self.connect(service=service.name)
+                client = self.boto_session.client(service.name)
             except botocore.exceptions.UnknownServiceError:
                 progress.remove_task(task_progress_ids[service.name])
                 continue
             if client is not None:
-                service_rights = check_rights(service=service, session_obj=client, progress=progress, progress_id=task_progress_ids[service.name])
+                service_rights = check_rights(arn=self.arn_linux_safe, service=service, session_obj=client, progress=progress, progress_id=task_progress_ids[service.name])
                 all_res.append(service_rights)
         return all_res
 
-    def connect(self, service: str) -> Union[boto3.session.Session | None]:
-        """
-            Connect to boto service and return client instance
-            :param service: name of the service
-        """
-        # logger.info(f"Connecting to AWS service : {service}")
-        try:
-            return self.boto_session.client(service,
-                                            aws_access_key_id=self.AWS_ACCESS_KEY_ID,
-                                            aws_secret_access_key=self.AWS_SECRET_ACCESS_KEY,
-                                            aws_session_token=self.AWS_SESSION_TOKEN,
-                                            region_name=self.AWS_REGION_NAME,
-                                            )
-        except Exception as e:
-            if "AccessDenied" in str(e):
-                logger.error(f"Impossible to connect to AWS service : {service}\n{str(e)}")
-            else:
-                raise e
+    # def connect(self, service: str) -> Union[boto3.session.Session | None]:
+    #     """
+    #         Connect to boto service and return client instance
+    #         :param service: name of the service
+    #     """
+    #     # logger.info(f"Connecting to AWS service : {service}")
+    #     try:
+    #         return self.boto_session.client(service)
+    #     except Exception as e:
+    #         if "AccessDenied" in str(e):
+    #             logger.error(f"Impossible to connect to AWS service : {service}\n{str(e)}")
+    #         else:
+    #             raise e
 
 
     def update_dynamically_services_functions(self):
@@ -130,8 +125,9 @@ class AWS_profile:
         for service in available_services:
             curr_service = Service(name=service)
             try:
-                boto_service: boto3.session.Session = self.connect(service=service)
+                boto_service: boto3.session.Session = self.boto_session.client(service_name=curr_service.name)
             except Exception as e:
+                logger.error(f"Impossible to connect to AWS service : {service}\n{str(e)}")
                 continue
             # logger.info(service)
             for function in dir(boto_service):
