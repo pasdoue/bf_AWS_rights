@@ -58,58 +58,56 @@ def worker(task_queue, aws_profile: AWS_profile, progress, task_progress_ids):
                 progress.remove_task(task_progress_ids[service.name])
             # logger.error(f"Task ["+",".join(services)+f"] failed with exception: {e}")
             logger.error(f"Error occurred : {e}")
+            console.print_exception(show_locals=True)
         finally:
             task_queue.task_done()  # Mark the task as done
 
-def load_config(credentials_file_path: Path = Path.home() / ".aws" / "credentials",
-                config_file_path: Path = Path.home() / ".aws" / "config") -> dict:
-    """
-        Load credentials and configurations from disk files.
-        Fallback to system variables if not found in config file
 
-        :param file_path: Path to the configuration file.
-        :return: A dictionary with configuration values.
-    """
-    settings = dict()
+def load_creds(credentials_file_path: Path = Path.home() / ".aws" / "credentials") -> dict:
     credentials = ConfigParser()
-    config = ConfigParser()
 
-    # logger.info(credentials_file_path)
-
-    # Check if the file exists
+    cred_section = ""
     if credentials_file_path.exists():
         credentials.read(credentials_file_path)
+        cred_section = "" if len(credentials.sections()) == 0 else credentials.sections()
+        if len(credentials.sections()) > 1:
+            cred_section = Prompt.ask(prompt="Choose credentials to use : ", choices=credentials.sections(), show_choices=True)
     else:
         logger.warning("AWS credentials file does not exist. Using environment variables.")
 
-    # Check if the file exists
+    settings = {
+        "aws_access_key_id": credentials.get(cred_section, "aws_access_key_id", fallback=os.getenv("AWS_ACCESS_KEY_ID", None)),
+        "aws_secret_access_key": credentials.get(cred_section, "aws_secret_access_key", fallback=os.getenv("AWS_SECRET_ACCESS_KEY", None)),
+        "aws_session_token": credentials.get(cred_section, "aws_session_token", fallback=os.getenv("AWS_SESSION_TOKEN", None)),
+    }
+    if cred_section:
+        settings["profile_name"] = cred_section
+    return settings
+
+def load_config(config_file_path: Path = Path.home() / ".aws" / "config") -> dict:
+    config = ConfigParser()
+
+    config_section = ""
     if config_file_path.exists():
         config.read(config_file_path)
+        config_section = "" if len(config.sections()) == 0 else config.sections()
+        if len(config.sections()) > 1:
+            config_section = Prompt.ask(prompt="Choose config to use : ", choices=config.sections(), show_choices=True)
     else:
         logger.warning("AWS config file does not exist. Using environment variables.")
 
-    cred_section = "" if len(credentials.sections()) == 0 else credentials.sections()[0]
-    if len(config.sections()) > 1:
-        cred_section = Prompt.ask(prompt="Choose credentials to use : ", choices=credentials.sections(), show_choices=True)
-
-    config_section = "" if len(config.sections()) == 0 else config.sections()[0]
-    if len(config.sections()) > 1:
-        config_section = Prompt.ask(prompt="Choose config to use : ", choices=config.sections(), show_choices=True)
-
-    # Get values from config file or environment variables
     settings = {
-        "AWS_ACCESS_KEY_ID": credentials.get(cred_section, "aws_access_key_id", fallback=os.getenv("AWS_ACCESS_KEY_ID", "")),
-        "AWS_SECRET_ACCESS_KEY": credentials.get(cred_section, "aws_secret_access_key", fallback=os.getenv("AWS_SECRET_ACCESS_KEY", "")),
-        "AWS_SESSION_TOKEN": credentials.get(cred_section, "aws_session_token", fallback=os.getenv("AWS_SESSION_TOKEN", "")),
-        "AWS_REGION_NAME": config.get(config_section, "region", fallback=os.getenv("AWS_REGION_NAME", "us-east-2")),
-        "AWS_OUTPUT": "json",
+        "region_name": config.get(config_section, "region", fallback=os.getenv("AWS_REGION_NAME", Config.DEFAULT_REGION_NAME)),
     }
+    return settings
 
-    # logger.info(settings)
+def load() -> dict:
+    settings = load_creds()
+    settings.update(load_config())
 
-    if not settings["AWS_ACCESS_KEY_ID"] and not settings["AWS_SECRET_ACCESS_KEY"]:
+    if not settings["aws_access_key_id"]:
         logger.critical("AWS access key ID not found.")
-    if not settings["AWS_SECRET_ACCESS_KEY"] and not settings["AWS_SECRET_ACCESS_KEY"]:
+    if not settings["aws_secret_access_key"]:
         logger.critical("AWS secret access key not found.")
 
     return settings
@@ -131,6 +129,8 @@ def print_elapsed_time(start: time.time) -> None:
 if __name__ == "__main__":
 
     print_banner()
+
+    settings = load()
 
     start = time.time()
 
@@ -155,8 +155,6 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--print-services', action="store_true", default=False, help='List of services to whitelist/scan separated by comma')
     parser.add_argument('--unsafe-mode', action="store_true", default=False, help='Perform potentially destructive functions. Disabled by default.')
     args = parser.parse_args()
-
-    settings = load_config()
 
     aws_profile = AWS_profile(services=services, creds=settings)
 
@@ -214,7 +212,6 @@ if __name__ == "__main__":
             thread.join(timeout=args.thread_timeout)
 
     print_elapsed_time(start=start)
-    logger.info("You can check availabled functions inside log file")
 
 
 
