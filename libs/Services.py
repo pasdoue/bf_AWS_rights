@@ -3,8 +3,6 @@ import os
 from pathlib import Path
 from typing import List
 
-from R2Log import logger
-
 from settings import Config
 
 
@@ -53,7 +51,7 @@ class Services:
 
     def __init__(self, filemap: Path, safe_mode: bool = True) -> None:
         self.filemap = filemap
-        self.safe_mode = safe_mode # by default is True to avoid wrong behaviours
+        self.safe_mode = safe_mode # by default is True to avoid wrong behaviors
         self.__whitelist: List[str] = []
         self.__blacklist: List[str] = []
         self.nb_services = 0
@@ -104,7 +102,6 @@ class Services:
             Return list of AWS services to bruteforce first including white list if exists and then always exclude black list.
             :param white_list: list of services to scan
             :param black_list: list of services to avoid
-            :param bf_services: dictionnary containing AWS services as key and array of associated functions as value
         """
         self.__blacklist = black_list
         self.__whitelist = white_list
@@ -137,5 +134,3 @@ class Services:
                        function.activated = True
                     else:
                         function.activated = False
-
-
