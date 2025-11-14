@@ -1,7 +1,6 @@
 import sys
 import argparse
 import os
-from pathlib import Path
 import time
 
 import logging
@@ -9,19 +8,16 @@ from typing import List
 
 from R2Log import logger, console
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
-
-from rich.prompt import Prompt, Confirm
-from configparser import ConfigParser
+from rich.emoji import Emoji
+from rich.prompt import Confirm
 
 import threading
 import queue
 import numpy as np
 
-from AWS_profile import AWS_profile
+from AWS_profile import AWS_profile, User_config
 from libs.Services import Services, Service
 from settings import Config
-
-NUMBER_OF_THREADS = 0
 
 file_handler = logging.FileHandler("logs.txt")
 file_handler.setLevel(logging.INFO)
@@ -42,7 +38,6 @@ def print_banner() -> None:
          Made by pasdoue
     """
     logger.info(banner)
-    logger.info("Be patient, script can take up to 6min to BF.\nWhen finished you can Ctrl+C or wait threads to exit.")
 
 def worker(task_queue, aws_profile: AWS_profile, progress, task_progress_ids):
     """Worker thread function to process tasks from the queue."""
@@ -62,56 +57,6 @@ def worker(task_queue, aws_profile: AWS_profile, progress, task_progress_ids):
         finally:
             task_queue.task_done()  # Mark the task as done
 
-
-def load_creds(credentials_file_path: Path = Path.home() / ".aws" / "credentials") -> dict:
-    credentials = ConfigParser()
-
-    cred_section = ""
-    if credentials_file_path.exists():
-        credentials.read(credentials_file_path)
-        cred_section = "" if len(credentials.sections()) == 0 else credentials.sections()
-        if len(credentials.sections()) > 1:
-            cred_section = Prompt.ask(prompt="Choose credentials to use : ", choices=credentials.sections(), show_choices=True)
-    else:
-        logger.warning("AWS credentials file does not exist. Using environment variables.")
-
-    settings = {
-        "aws_access_key_id": credentials.get(cred_section, "aws_access_key_id", fallback=os.getenv("AWS_ACCESS_KEY_ID", None)),
-        "aws_secret_access_key": credentials.get(cred_section, "aws_secret_access_key", fallback=os.getenv("AWS_SECRET_ACCESS_KEY", None)),
-        "aws_session_token": credentials.get(cred_section, "aws_session_token", fallback=os.getenv("AWS_SESSION_TOKEN", None)),
-    }
-    if cred_section:
-        settings["profile_name"] = cred_section
-    return settings
-
-def load_config(config_file_path: Path = Path.home() / ".aws" / "config") -> dict:
-    config = ConfigParser()
-
-    config_section = ""
-    if config_file_path.exists():
-        config.read(config_file_path)
-        config_section = "" if len(config.sections()) == 0 else config.sections()
-        if len(config.sections()) > 1:
-            config_section = Prompt.ask(prompt="Choose config to use : ", choices=config.sections(), show_choices=True)
-    else:
-        logger.warning("AWS config file does not exist. Using environment variables.")
-
-    settings = {
-        "region_name": config.get(config_section, "region", fallback=os.getenv("AWS_REGION_NAME", Config.DEFAULT_REGION_NAME)),
-    }
-    return settings
-
-def load() -> dict:
-    settings = load_creds()
-    settings.update(load_config())
-
-    if not settings["aws_access_key_id"]:
-        logger.critical("AWS access key ID not found.")
-    if not settings["aws_secret_access_key"]:
-        logger.critical("AWS secret access key not found.")
-
-    return settings
-
 def verify_unsafe(unsafe: bool, aws_profile: AWS_profile):
     if unsafe:
         resp = Confirm.ask("Are you sure you want to run this script in unsafe mode ?", show_choices=True)
@@ -125,12 +70,9 @@ def print_elapsed_time(start: time.time) -> None:
     end = time.time()
     logger.info(f"Script took : {str(end - start)} seconds")
 
-
 if __name__ == "__main__":
 
     print_banner()
-
-    settings = load()
 
     start = time.time()
 
@@ -138,6 +80,8 @@ if __name__ == "__main__":
     services_choices = services.get_services_names()
 
     parser = argparse.ArgumentParser(description='Bruteforce AWS rights with boto3')
+    parser.add_argument('--credentials-file', default=User_config.default_credentials_file_path, help='AWS credentials file')
+    parser.add_argument('--config-file', default=User_config.default_config_file_path, help='AWS config file')
     parser.add_argument('-t', '--threads', type=int, default=75, help='Number of threads to use')
     parser.add_argument('--thread-timeout', type=int, default=30, help='Timeout consumed before killing thread')
     parser.add_argument('-u', '--update-services', action="store_true", default=False,
@@ -152,9 +96,11 @@ if __name__ == "__main__":
                         choices=services_choices,
                         help='List of services to whitelist/scan separated by comma. Launch script with -p to see services',
                         metavar='PARAMETER')
-    parser.add_argument('-p', '--print-services', action="store_true", default=False, help='List of services to whitelist/scan separated by comma')
+    parser.add_argument('-p', '--print-services', action="store_true", default=False, help='List of all available services')
     parser.add_argument('--unsafe-mode', action="store_true", default=False, help='Perform potentially destructive functions. Disabled by default.')
     args = parser.parse_args()
+
+    settings = User_config.load(config_file_path=args.config_file, credentials_file_path=args.credentials_file)
 
     aws_profile = AWS_profile(services=services, creds=settings)
 
@@ -165,9 +111,14 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if args.print_services:
-        logger.info('\t'.join([service.name for service in services.get_services()]))
+        services = services.get_services()
+        logger.info(f"{Emoji('hamster')} Every service are listed below with it's associated number of functions : ")
+        logger.info('\t'.join([f"{service.name} [{str(len(service.get_functions()))}]" for service in services]))
+        logger.info(f"Total number of services : {str(len(services))}")
         print_elapsed_time(start=start)
         sys.exit(0)
+
+    logger.info(f"Be patient, script can take up to 6min to BF. {Emoji('pray')}")
 
     verify_unsafe(unsafe=args.unsafe_mode, aws_profile=aws_profile)
 
@@ -211,7 +162,6 @@ if __name__ == "__main__":
         for thread in threads:
             thread.join(timeout=args.thread_timeout)
 
+    logger.success(f"{Emoji('partying_face')} All results have been written to this folder : {aws_profile.arn_linux_safe}")
     print_elapsed_time(start=start)
-
-
-
+    logger.info(f"Please wait for threads to exit properly (even if Ctrl+C should not cause damages to results) {Emoji('hamster')}")
