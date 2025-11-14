@@ -1,11 +1,16 @@
+import inspect
 import json
+from configparser import ConfigParser
 from pathlib import Path
-from typing import List, Union, Dict
+from typing import List, Dict, Union
 
 from R2Log import logger
 
 import boto3, botocore
 from inspect import signature
+
+from rich.emoji import Emoji
+from rich.prompt import Prompt
 
 from libs.Services import Services, Service, Function
 from settings import Config
@@ -19,8 +24,6 @@ def write_rights_to_file(service: Service, arn: str, res: dict):
         :param res:
         :return:
     """
-    # arn = session_obj.client('sts').get_caller_identity().get('Arn')  # retrieve user Arn
-    # arn = arn.split(':')[-1].replace('/', '_')  # Get end of Arn which is human-readable and remove '/' inside
     output_folder = Path(__file__).parent / arn
     output_file = output_folder / f"{service.name}.json"
 
@@ -38,7 +41,6 @@ def check_rights(arn: str, service: Service, session_obj: boto3.session.Session,
             if any(function.name.startswith(safe_mode) for safe_mode in Config.SAFE_MODE):
                 service_function = getattr(session_obj, function.name)
                 if service_function is None:
-                    # logger.warning(f"Function {function} is not available")
                     res[service.name][function.name] = "unavailable"
                 else:
                     try:
@@ -56,14 +58,83 @@ def check_rights(arn: str, service: Service, session_obj: boto3.session.Session,
                         logger.success(f"{service.name}:{function.name} is available")
                         res[service.name][function.name] = ret
                     else:
-                        # logger.warning(f"Function {function} empty")
                         res[service.name][function.name] = "empty"
                 progress.update(progress_id, advance=1)
         write_rights_to_file(service=service, arn=arn, res=res)
         progress.remove_task(progress_id)
         return res
 
+class User_config:
+    """
+        This class will parse config file of user and return a dict with all params to use in boto3.session.Session.
+        Because boto3.session.Session params differs from config files (thanks AWS... grrr) we need to reformat them
+    """
+    default_credentials_file_path: Path = Path.home() / ".aws" / "credentials"
+    default_config_file_path: Path = Path.home() / ".aws" / "config"
 
+    @classmethod
+    def _load_credentials_file(cls, credentials_file_path: Path = default_credentials_file_path) -> Union[dict, None]:
+        res = {}
+        credentials = ConfigParser()
+
+        if credentials_file_path.exists():
+            credentials.read(credentials_file_path)
+            if len(credentials.sections()) > 1:
+                cred_section = Prompt.ask(prompt="Choose credentials to use : ", choices=credentials.sections(),
+                                          show_choices=True)
+            elif len(credentials.sections()) == 1:
+                cred_section = credentials.sections()[0]
+            else:
+                logger.critical(f"{Emoji('hamster')} AWS credentials file detected but no section found.")
+
+            if cred_section:
+                tmp = dict(credentials.items(cred_section))
+                res["profile_name"] = cred_section
+
+                # Because AWS Boto library Session only accept those params and no other ones... We need to remove all other params... GG AWS
+                for k, v in tmp.items():
+                    # verify this param exists in boto3.session.Session
+                    if k in inspect.signature(boto3.session.Session).parameters.keys():
+                        res[k] = v
+            return res
+        else:
+            logger.critical(f"{Emoji('no_entry_sign')} AWS credentials file does not exists. Configure it to launch script")
+
+    @classmethod
+    def _load_config(cls, config_file_path: Path = default_config_file_path) -> Union[dict, None]:
+        config = ConfigParser()
+
+        if config_file_path.exists():
+            config.read(config_file_path)
+            if len(config.sections()) > 1:
+                config_section = Prompt.ask(prompt="Choose config to use : ", choices=config.sections(),
+                                            show_choices=True)
+            elif len(config.sections()) == 1:
+                config_section = config.sections()[0]
+            else:
+                logger.critical(f"{Emoji('hamster')} AWS config file detected but no section found.")
+
+            # Because AWS Boto library Session only accept those params and no other ones... We need to remove all other params... GG AWS
+            return {"region_name": config.get(config_section, "region")}
+        else:
+            logger.critical(f"{Emoji('no_entry_sign')} AWS config file does not exist. Using environment variables. Configure it to launch script")
+
+    @staticmethod
+    def load(credentials_file_path: Union[Path|str] = default_credentials_file_path,
+             config_file_path: Union[Path|str] = default_config_file_path) -> dict:
+
+        credentials_file_path = Path(credentials_file_path) if isinstance(credentials_file_path, str) else credentials_file_path
+        config_file_path = Path(config_file_path) if isinstance(config_file_path, str) else config_file_path
+
+        settings = User_config._load_credentials_file(credentials_file_path=credentials_file_path)
+        settings.update(User_config._load_config(config_file_path=config_file_path))
+
+        if not settings["aws_access_key_id"]:
+            logger.critical("AWS access key ID not found.")
+        if not settings["aws_secret_access_key"]:
+            logger.critical("AWS secret access key not found.")
+
+        return settings
 
 class AWS_profile:
 
@@ -99,21 +170,6 @@ class AWS_profile:
                 all_res.append(service_rights)
         return all_res
 
-    # def connect(self, service: str) -> Union[boto3.session.Session | None]:
-    #     """
-    #         Connect to boto service and return client instance
-    #         :param service: name of the service
-    #     """
-    #     # logger.info(f"Connecting to AWS service : {service}")
-    #     try:
-    #         return self.boto_session.client(service)
-    #     except Exception as e:
-    #         if "AccessDenied" in str(e):
-    #             logger.error(f"Impossible to connect to AWS service : {service}\n{str(e)}")
-    #         else:
-    #             raise e
-
-
     def update_dynamically_services_functions(self):
         """
             Retrieve boto3 available services and then retrieve all associated functions
@@ -121,7 +177,6 @@ class AWS_profile:
         logger.info("Updating dynamically list of AWS services and associated functions")
 
         available_services = self.boto_session.get_available_services()
-        # logger.info(available_services)
         for service in available_services:
             curr_service = Service(name=service)
             try:
@@ -129,13 +184,11 @@ class AWS_profile:
             except Exception as e:
                 logger.error(f"Impossible to connect to AWS service : {service}\n{str(e)}")
                 continue
-            # logger.info(service)
             for function in dir(boto_service):
                 if not function.startswith("_") and not "delete" in function.lower():
                     func = getattr(boto_service, function)
                     try:
                         sig = signature(func)
-                        # logger.info(f"{service} -> {function} len({len(sig.parameters)})")
                         if len(sig.parameters) <= 2:
                             curr_service.add_function(function=Function(name=function))
                     except TypeError as e:
