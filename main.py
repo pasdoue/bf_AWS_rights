@@ -14,18 +14,11 @@ from rich.prompt import Confirm
 import threading
 import queue
 import numpy as np
+from itertools import zip_longest
 
 from AWS_profile import AWS_profile, User_config
 from libs.Services import Services, Service
 from settings import Config
-
-file_handler = logging.FileHandler("logs.txt")
-file_handler.setLevel(logging.INFO)
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-file_handler.setFormatter(formatter)
-
-# Add the file handler to the logger
-logger.addHandler(file_handler)
 
 def print_banner() -> None:
     banner = """
@@ -70,6 +63,46 @@ def print_elapsed_time(start: time.time) -> None:
     end = time.time()
     logger.info(f"Script took : {str(end - start)} seconds")
 
+def set_logger(level: int):
+    logger.setVerbosity(level)
+    file_handler = logging.FileHandler("logs.txt")
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    file_handler.setLevel(logger.level)
+    file_handler.setFormatter(formatter)
+
+    # Add the file handler to the logger
+    logger.addHandler(file_handler)
+
+def print_services(s: Services):
+    """
+        Print services and their associated number of functions.
+        Will display only selected services to estimate the number of calls to perform.
+        (allow estimating if furtivity is in place or not)
+    """
+    call_to_perform = 0
+    repr_array = []
+    activated_services = s.get_services()
+    logger.info(f"{Emoji('hamster')} Every service are listed below with it's associated number of functions : ")
+    for service in activated_services:
+        call_to_perform += len(service.get_functions())
+        repr_array.append((service.name, len(service.get_functions())))
+
+    PAIRS_PER_ROW = min(len(repr_array),5)  # change to 3, 4, etc.
+
+    # compute column widths
+    name_width = max(len(name) for name, _ in repr_array)
+    num_width = max(len(str(num)) for _, num in repr_array)
+
+    it = iter(repr_array)
+    for group in zip_longest(*[it] * PAIRS_PER_ROW, fillvalue=("", "")):
+        console.print("   ".join(
+            f"{name:<{name_width}} [{num:>{num_width}}]"
+            for name, num in group
+        ), highlight=True)
+
+    logger.info(f"Total number of services : {len(activated_services)}")
+    logger.info(f"Total number of call to perform : {call_to_perform}")
+
 if __name__ == "__main__":
 
     print_banner()
@@ -98,7 +131,10 @@ if __name__ == "__main__":
                         metavar='PARAMETER')
     parser.add_argument('-p', '--print-services', action="store_true", default=False, help='List of all available services')
     parser.add_argument('--unsafe-mode', action="store_true", default=False, help='Perform potentially destructive functions. Disabled by default.')
+    parser.add_argument("-v", "--verbose", action="count", default=0, help="Verbosity level (-v for verbose, -vv for advanced, -vvv for debug)")
     args = parser.parse_args()
+
+    set_logger(level=args.verbose)
 
     settings = User_config.load(config_file_path=args.config_file, credentials_file_path=args.credentials_file)
 
@@ -111,10 +147,8 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if args.print_services:
-        services = services.get_services()
-        logger.info(f"{Emoji('hamster')} Every service are listed below with it's associated number of functions : ")
-        logger.info('\t'.join([f"{service.name} [{str(len(service.get_functions()))}]" for service in services]))
-        logger.info(f"Total number of services : {str(len(services))}")
+        services.calculate_white_and_black_list(white_list=args.white_list, black_list=args.black_list)
+        print_services(s=services)
         print_elapsed_time(start=start)
         sys.exit(0)
 
@@ -162,6 +196,6 @@ if __name__ == "__main__":
         for thread in threads:
             thread.join(timeout=args.thread_timeout)
 
-    logger.success(f"{Emoji('partying_face')} All results have been written to this folder : {aws_profile.arn_linux_safe}")
+    logger.success(f"{Emoji('partying_face')} All results have been written to this folder : {aws_profile.get_arn_safe_linux(aws_profile.arn)}")
     print_elapsed_time(start=start)
     logger.info(f"Please wait for threads to exit properly (even if Ctrl+C should not cause damages to results) {Emoji('hamster')}")

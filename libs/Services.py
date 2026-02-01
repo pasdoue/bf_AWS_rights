@@ -6,23 +6,21 @@ from typing import List
 from settings import Config
 
 
-class Param:
-
-    def __init__(self, name: str):
-        self.name = name
-
 class Function:
+    """
+        A representation of a function avalaible in an AWS service
+        for example : list-policies (inside iam service)
+    """
 
-    def __init__(self, name: str, arguments: List[Param] = None, activated: bool = True):
+    def __init__(self, name: str, activated: bool = True):
         self.name = name
-        self.arguments = list() if arguments is None else arguments
         self.activated = activated
 
-    def add_raw_args(self, args_names: List[str]):
-        for arg_name in args_names:
-            self.arguments.append(Param(arg_name))
 
 class Service:
+    """
+        A representation of an AWS services (iam, ssm...)
+    """
 
     def __init__(self, name: str, functions: List[Function] = None, activated: bool = True) -> None:
         self.name = name

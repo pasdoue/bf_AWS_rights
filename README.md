@@ -43,15 +43,15 @@ python3 main.py -u
 > Help
 
 ```bash
-[*]                                                                                                                                                                                           
-          ____  ______        __          _______       _____  _____ _____ _    _ _______ _____                                                                                               
-         |  _ \|  ____|      /\ \        / / ____|     |  __ \|_   _/ ____| |  | |__   __/ ____|                                                                                              
-         | |_) | |__ ______ /  \ \  /\  / / (___ ______| |__) | | || |  __| |__| |  | | | (___                                                                                                
-         |  _ <|  __|______/ /\ \ \/  \/ / \___ \______|  _  /  | || | |_ |  __  |  | |  \___ \                                                                                               
-         | |_) | |        / ____ \  /\  /  ____) |     | | \ \ _| || |__| | |  | |  | |  ____) |                                                                                              
-         |____/|_|       /_/    \_\/  \/  |_____/      |_|  \_\_____\_____|_|  |_|  |_| |_____/                                                                                               
-         Made by pasdoue                                                                                                                                                                      
-                                                                                                                                                                                              
+[*]
+          ____  ______        __          _______       _____  _____ _____ _    _ _______ _____
+         |  _ \|  ____|      /\ \        / / ____|     |  __ \|_   _/ ____| |  | |__   __/ ____|
+         | |_) | |__ ______ /  \ \  /\  / / (___ ______| |__) | | || |  __| |__| |  | | | (___
+         |  _ <|  __|______/ /\ \ \/  \/ / \___ \______|  _  /  | || | |_ |  __  |  | |  \___ \ 
+         | |_) | |        / ____ \  /\  /  ____) |     | | \ \ _| || |__| | |  | |  | |  ____) |
+         |____/|_|       /_/    \_\/  \/  |_____/      |_|  \_\_____\_____|_|  |_|  |_| |_____/
+         Made by pasdoue
+
 usage: main.py [-h] [--credentials-file CREDENTIALS_FILE] [--config-file CONFIG_FILE] [-t THREADS] [--thread-timeout THREAD_TIMEOUT] [-u] [-b [PARAMETER ...]] [-w [PARAMETER ...]] [-p]
                [--unsafe-mode]
 
@@ -77,22 +77,32 @@ options:
   --unsafe-mode         Perform potentially destructive functions. Disabled by default.
 ```
 
-Show list of services : 
+Launch scan on all services : 
+```bash
+python3 main.py
+```
+
+Show list of available services : 
 ```bash
 python3 main.py -p
 ```
 
-Generate scan with white-list : 
+Scan using white-list : 
 ```bash
 python3 main.py -w ec2 sts pricing dynamodb
 ```
 
-Generate scan with black-list : 
+Show number of calls that will be performed using only some services : 
+```bash
+python3 main.py -p -w ec2 sts dynamodb
+```
+
+Scan using black-list : 
 ```bash
 python3 main.py -b cloudhsm cloudhsmv2 sms dynamodb
 ```
 
-Generate scan with black-list & white-list (will perform scan on white list without "dynamodb" service): 
+Scan using black-list & white-list (will perform scan on white list without "dynamodb" service): 
 ```bash
 python3 main.py -w ec2 sts pricing dynamodb -b cloudhsm cloudhsmv2 sms dynamodb
 ```
@@ -104,7 +114,8 @@ python3 main.py --unsafe-mode
 
 ## TBD : 
 
-- [X] Try to attach logger messages to console
+- [ ] Implement V3 (but shush it's a secret :D)
+- [ ] Detect if some results will be erased and trigger a warning if different from previous run
 - [ ] Maybe chunk output json files that are too big (but make it optional)
 
 ## Bonus

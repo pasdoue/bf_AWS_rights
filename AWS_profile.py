@@ -1,8 +1,10 @@
+import importlib
 import inspect
 import json
+import pkgutil
 from configparser import ConfigParser
 from pathlib import Path
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Any
 
 from R2Log import logger
 
@@ -12,57 +14,30 @@ from inspect import signature
 from rich.emoji import Emoji
 from rich.prompt import Prompt
 
+import meta_aws
 from libs.Services import Services, Service, Function
 from settings import Config
 
 
-def write_rights_to_file(service: Service, arn: str, res: dict):
+def search_adequate_module(module: str, method: str, arn: str, boto_func: Any) -> Union[Any, None]:
     """
-        Write to output file the result of batch
-        :param service:
-        :param arn:
-        :param res:
-        :return:
+    Search for a specific method within a module within the meta_aws package.
+
+    Args:
+        module (str): The name of the AWS SDK service to check.
+        method (str): The name of the method to execute within the service.
     """
-    output_folder = Path(__file__).parent / arn
-    output_file = output_folder / f"{service.name}.json"
+    for _, module_name, _ in pkgutil.iter_modules(meta_aws.__path__):
+        if module_name == module:
+            loaded_module = importlib.import_module(f"{meta_aws.__name__}.{module_name}")
+            for _, obj in inspect.getmembers(loaded_module, inspect.isclass):
+                # ensure class is defined in this module (not imported)
+                if obj.__name__ != "MetaAWS":
+                    if hasattr(obj, method):
+                        loaded_class = obj(arn=arn, boto_func=boto_func)
+                        return getattr(loaded_class, method)()
+    return None
 
-    if not output_folder.exists():
-        output_folder.mkdir()
-
-    output_file.write_text(json.dumps(res, indent=4, sort_keys=True, default=str))
-
-
-def check_rights(arn: str, service: Service, session_obj: boto3.session.Session, progress, progress_id) -> dict:
-        res = dict()
-        res[service.name] = {}
-
-        for function in service.get_functions():
-            if any(function.name.startswith(safe_mode) for safe_mode in Config.SAFE_MODE):
-                service_function = getattr(session_obj, function.name)
-                if service_function is None:
-                    res[service.name][function.name] = "unavailable"
-                else:
-                    try:
-                        ret = service_function()
-                    except Exception as e:
-                        if "AccessDenied" in str(e) or "ForbiddenException" in str(e):
-                            res[service.name][function.name] = "Access Denied"
-                        elif "Missing required parameter" in str(e):
-                            res[service.name][function.name] = "Missing required parameter"
-                        else:
-                            res[service.name][function.name] = f"Unknwon Exception : {str(e)}"
-                        progress.update(progress_id, advance=1)
-                        continue
-                    if ret is not None:
-                        logger.success(f"{service.name}:{function.name} is available")
-                        res[service.name][function.name] = ret
-                    else:
-                        res[service.name][function.name] = "empty"
-                progress.update(progress_id, advance=1)
-        write_rights_to_file(service=service, arn=arn, res=res)
-        progress.remove_task(progress_id)
-        return res
 
 class User_config:
     """
@@ -79,6 +54,7 @@ class User_config:
 
         if credentials_file_path.exists():
             credentials.read(credentials_file_path)
+            cred_section = ""
             if len(credentials.sections()) > 1:
                 cred_section = Prompt.ask(prompt="Choose credentials to use : ", choices=credentials.sections(),
                                           show_choices=True)
@@ -106,6 +82,7 @@ class User_config:
 
         if config_file_path.exists():
             config.read(config_file_path)
+            config_section = ""
             if len(config.sections()) > 1:
                 config_section = Prompt.ask(prompt="Choose config to use : ", choices=config.sections(),
                                             show_choices=True)
@@ -123,8 +100,8 @@ class User_config:
     def load(credentials_file_path: Union[Path|str] = default_credentials_file_path,
              config_file_path: Union[Path|str] = default_config_file_path) -> dict:
 
-        credentials_file_path = Path(credentials_file_path) if isinstance(credentials_file_path, str) else credentials_file_path
-        config_file_path = Path(config_file_path) if isinstance(config_file_path, str) else config_file_path
+        credentials_file_path = Path(credentials_file_path).expanduser() if isinstance(credentials_file_path, str) else credentials_file_path.expanduser()
+        config_file_path = Path(config_file_path).expanduser() if isinstance(config_file_path, str) else config_file_path.expanduser()
 
         settings = User_config._load_credentials_file(credentials_file_path=credentials_file_path)
         settings.update(User_config._load_config(config_file_path=config_file_path))
@@ -144,20 +121,20 @@ class AWS_profile:
             :param kwargs: creds used
         """
         self.boto_session = boto3.session.Session(**creds)
-        self.__services = services
+        self.__services: Services = services
         self.__safe_mode = True
         self.arn = self.boto_session.client('sts').get_caller_identity().get('Arn')
-        self.arn_linux_safe = self.arn.split(':')[-1].replace('/','_') # Get end of Arn which is human-readable and remove '/' inside
+        self.output_folder_name = AWS_profile.get_arn_safe_linux(arn=self.arn) # Get end of Arn which is human-readable and remove '/' inside
 
+    @staticmethod
+    def get_arn_safe_linux(arn: str) -> str:
+        return arn.split(':')[-1].replace('/','_')
 
     def set_unsafe_mode(self):
         self.__safe_mode = False
         self.__services.set_unsafe_mode()
 
     def launch_discovery(self, services: List[Service], progress, task_progress_ids):
-        """
-
-        """
         all_res = list()
         for service in services:
             try:
@@ -166,13 +143,66 @@ class AWS_profile:
                 progress.remove_task(task_progress_ids[service.name])
                 continue
             if client is not None:
-                service_rights = check_rights(arn=self.arn_linux_safe, service=service, session_obj=client, progress=progress, progress_id=task_progress_ids[service.name])
+                service_rights = self.check_rights(service=service, session_obj=client, progress=progress, progress_id=task_progress_ids[service.name])
                 all_res.append(service_rights)
         return all_res
 
+    def check_rights(self, service: Service, session_obj: boto3.session.Session, progress, progress_id) -> dict:
+        """
+            Perform actual SDK call to AWS to check rights of calling
+        """
+        res = dict()
+        res[service.name] = {}
+
+        for function in service.get_functions():
+            if any(function.name.startswith(safe_mode) for safe_mode in Config.SAFE_MODE):
+                service_function = getattr(session_obj, function.name)
+                if service_function is None:
+                    res[service.name][function.name] = "unavailable"
+                else:
+                    try:
+                        # search if custom method is implemented to hijack simple call to method
+                        ret = search_adequate_module(module=service.name, method=function.name, arn=self.arn, boto_func=service_function)
+                        if ret is None:
+                            ret = service_function()
+                    except Exception as e:
+                        if any(x in str(e) for x in ["UnauthorizedOperation", "AccessDenied", "ForbiddenException"]) :
+                            res[service.name][function.name] = "Access Denied"
+                        elif "Missing required parameter" in str(e):
+                            res[service.name][function.name] = "Missing required parameter"
+                        else:
+                            res[service.name][function.name] = f"Unknwon Exception : {str(e)}"
+                        progress.update(progress_id, advance=1)
+                        continue
+                    if ret is not None:
+                        logger.success(f"{service.name}:{function.name} is available")
+                        res[service.name][function.name] = ret
+                    else:
+                        res[service.name][function.name] = "empty"
+                progress.update(progress_id, advance=1)
+        self.write_rights_to_file(service=service, res=res)
+        progress.remove_task(progress_id)
+        return res
+
+    def write_rights_to_file(self, service: Service, res: dict):
+        """
+            Write to output file the result of batch
+            :param service:
+            :param res:
+            :return:
+        """
+        output_folder = Path(__file__).parent / self.output_folder_name
+        output_file = output_folder / f"{service.name}.json"
+
+        if not output_folder.exists():
+            output_folder.mkdir()
+
+        output_file.write_text(json.dumps(res, indent=4, sort_keys=True, default=str))
+
     def update_dynamically_services_functions(self):
         """
-            Retrieve boto3 available services and then retrieve all associated functions
+            Retrieve boto3 available services and then retrieve all associated functions.
+            Results are saved in a file.
         """
         logger.info("Updating dynamically list of AWS services and associated functions")
 
